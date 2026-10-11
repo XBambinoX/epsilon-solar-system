@@ -3,19 +3,23 @@ const double DaysPerSecond = 1;
 const double FieldOfView = Math.PI / 4;
 // Far away a planet would be smaller than a pixel, so every body is drawn at least this large.
 const double MinimumRadiusInPixels = 3;
+// With reverse-Z in a float depth buffer the near plane can be a meter away and the far plane at infinity.
+const double NearPlane = 0.001;
 
 var options = WindowOptions.Default with
 {
     Title = "Epsilon Solar System",
     Size = new(1280, 720),
-    API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3)),
-    PreferredDepthBufferBits = 24,
+    // 4.5 for glClipControl, which reverse-Z needs.
+    API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(4, 5)),
     VSync = true,
 };
 
 using var window = Window.Create(options);
 GL gl = null!;
 IInputContext input = null!;
+IKeyboard keyboard = null!;
+SceneFramebuffer scene = null!;
 ShaderProgram bodyShader = null!;
 ShaderProgram lineShader = null!;
 Mesh sphere = null!;
@@ -24,36 +28,69 @@ Dictionary<Body, Mesh> orbitLines = null!;
 var system = new SolarSystem();
 var julianDate = SolarSystem.JulianDate(DateTime.UtcNow);
 system.Update(julianDate);
-var realTime = 0.0;
 
-// The camera circles the body in focus: 0 is the Sun, 1 to 8 the planets, 9 the Moon; the wheel zooms.
-var focus = system.Sun;
-var distance = DefaultDistance(focus);
+// 0 circles the Sun, 1 to 8 the planets, 9 the Moon; W, A, S, D, E, Q fly; a drag with the left button turns.
+var camera = new Camera(system.Sun);
+var dragging = false;
+System.Numerics.Vector2? lastMouse = null;
+// F shows what an engine that keeps its world in float would: the GPU gets coordinates around the Sun instead
+// of around the camera, and a float there has steps of 16 km at Earth's distance, 500 km at Neptune's.
+var floatWorld = false;
 
 window.Load += () =>
 {
     gl = window.CreateOpenGL();
     input = window.CreateInput();
-    foreach (var keyboard in input.Keyboards)
-        keyboard.KeyDown += (_, key, _) =>
-        {
-            if (key == Key.Escape)
-                window.Close();
-            else if (key is >= Key.Number0 and <= Key.Number9)
-            {
-                focus = system.Bodies[key - Key.Number0];
-                distance = DefaultDistance(focus);
-            }
-        };
+    keyboard = input.Keyboards[0];
+    keyboard.KeyDown += (_, key, _) =>
+    {
+        if (key == Key.Escape)
+            window.Close();
+        else if (key is >= Key.Number0 and <= Key.Number9)
+            camera.Orbit(system.Bodies[key - Key.Number0]);
+        else if (key == Key.F)
+            floatWorld = !floatWorld;
+    };
     foreach (var mouse in input.Mice)
-        mouse.Scroll += (_, wheel) => distance = Math.Max(distance * Math.Pow(1.2, -wheel.Y), 1.5 * focus.Radius);
+    {
+        mouse.Scroll += (_, wheel) => camera.Wheel(wheel.Y);
+        // The cursor is captured while dragging, so it never stops at the edge of the screen. Capturing it moves
+        // it to the middle of the window, so the first move after that only sets the starting point.
+        mouse.MouseDown += (m, button) =>
+        {
+            if (button != MouseButton.Left)
+                return;
+            dragging = true;
+            m.Cursor.CursorMode = CursorMode.Raw;
+            lastMouse = null;
+        };
+        mouse.MouseUp += (m, button) =>
+        {
+            if (button != MouseButton.Left)
+                return;
+            dragging = false;
+            m.Cursor.CursorMode = CursorMode.Normal;
+        };
+        mouse.MouseMove += (_, position) =>
+        {
+            if (dragging && lastMouse is { } last)
+                camera.Turn(position.X - last.X, position.Y - last.Y);
+            lastMouse = position;
+        };
+    }
 
     Console.WriteLine($"OpenGL {gl.GetStringS(StringName.Version)}, {gl.GetStringS(StringName.Renderer)}");
     // With display scaling the framebuffer is larger than the window, and no resize event comes at the start.
-    gl.Viewport(window.FramebufferSize);
+    var size = window.FramebufferSize;
+    gl.Viewport(size);
+    scene = new SceneFramebuffer(gl, size.X, size.Y);
     gl.ClearColor(0.01f, 0.01f, 0.03f, 1f);
-    gl.Enable(EnableCap.DepthTest);
     gl.Enable(EnableCap.CullFace);
+    // Reverse-Z: depths from 0 to 1 instead of -1 to 1, 1 at the near plane and 0 at infinity, so nearer is greater.
+    gl.Enable(EnableCap.DepthTest);
+    gl.ClipControl(ClipControlOrigin.LowerLeft, ClipControlDepth.ZeroToOne);
+    gl.ClearDepth(0);
+    gl.DepthFunc(DepthFunction.Greater);
 
     bodyShader = new ShaderProgram(gl, Shaders.BodyVertex, Shaders.BodyFragment);
     lineShader = new ShaderProgram(gl, Shaders.LineVertex, Shaders.LineFragment);
@@ -64,45 +101,65 @@ window.Load += () =>
         .ToDictionary(body => body, body => Mesh.Ellipse(gl, body.OrbitElements.Eccentricity));
 };
 
-window.FramebufferResize += size => gl.Viewport(size);
+window.FramebufferResize += size =>
+{
+    gl.Viewport(size);
+    if (size.X > 0 && size.Y > 0)
+        scene.Resize(size.X, size.Y);
+};
 
 window.Update += deltaTime =>
 {
-    realTime += deltaTime;
     julianDate += DaysPerSecond * deltaTime;
     system.Update(julianDate);
 
-    var title = $"Epsilon Solar System - {SolarSystem.ToDateTime(julianDate):yyyy-MM-dd} - {focus.Name}";
+    // Forward, left, back, right, up, down; Shift is five times faster. The speed is the distance to the
+    // nearest surface per second, a meter per second at the least: slow near a body, fast in empty space.
+    var direction = Vector3<double>.Zero;
+    if (keyboard.IsKeyPressed(Key.W)) direction += Vector3<double>.UnitX;
+    if (keyboard.IsKeyPressed(Key.S)) direction -= Vector3<double>.UnitX;
+    if (keyboard.IsKeyPressed(Key.A)) direction += Vector3<double>.UnitY;
+    if (keyboard.IsKeyPressed(Key.D)) direction -= Vector3<double>.UnitY;
+    if (keyboard.IsKeyPressed(Key.E)) direction += Vector3<double>.UnitZ;
+    if (keyboard.IsKeyPressed(Key.Q)) direction -= Vector3<double>.UnitZ;
+    if (direction != Vector3<double>.Zero)
+    {
+        var eye = camera.Eye;
+        var nearestSurface = system.Bodies.Min(body => eye.Distance(body.Position) - body.Radius);
+        var boost = keyboard.IsKeyPressed(Key.ShiftLeft) || keyboard.IsKeyPressed(Key.ShiftRight) ? 5 : 1;
+        camera.Fly(direction, boost * Math.Max(nearestSurface, 0.001), deltaTime);
+    }
+    camera.Update(deltaTime);
+
+    var title = $"Epsilon Solar System - {SolarSystem.ToDateTime(julianDate):yyyy-MM-dd} - " +
+        $"{(camera.IsFree ? "flying with" : "orbiting")} {camera.Focus.Name} - " +
+        (floatWorld ? "float world coordinates (F)" : "camera-relative, double (F)");
     if (window.Title != title)
         window.Title = title;
 };
 
 window.Render += _ =>
 {
-    gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
     var size = window.FramebufferSize;
     if (size.X == 0 || size.Y == 0)
         return; // minimized
+    scene.Bind();
+    gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
-    // One turn in two minutes around the body in focus, 20 degrees above the plane of the ecliptic.
-    var azimuth = 2 * Math.PI * realTime / 120;
-    var elevation = double.DegreesToRadians(20);
-    var direction = new Vector3<double>(
-        Math.Cos(elevation) * Math.Cos(azimuth),
-        Math.Cos(elevation) * Math.Sin(azimuth),
-        Math.Sin(elevation));
-    var eye = focus.Position + direction * distance;
-    var view = Matrix4x4<double>.LookAt(eye, focus.Position, Vector3<double>.UnitZ);
-    // The near plane keeps to the distance from the surface in focus; the far plane is at infinity.
-    var near = 0.01 * (distance - focus.Radius);
+    // Everything is computed in double, then turned into float for the GPU around this origin: the camera
+    // itself, so the coordinates near it stay small and exact, or the Sun, as a float world would have it.
+    var eye = camera.Eye;
+    var origin = floatWorld ? Vector3<double>.Zero : eye;
+    var cameraPosition = eye - origin;
+    var view = Matrix4x4<double>.LookAt(cameraPosition, cameraPosition + camera.Forward, camera.Up);
     var projection = Matrix4x4<double>.Perspective(
-        FieldOfView, (double)size.X / size.Y, near, double.PositiveInfinity, DepthRange.MinusOneToOne);
+        FieldOfView, (double)size.X / size.Y, NearPlane, double.PositiveInfinity, DepthRange.OneToZero);
     var viewProjection = (projection * view).Map(float.CreateTruncating);
 
     bodyShader.Use();
     bodyShader.Set("uViewProjection", viewProjection);
-    bodyShader.Set("uCameraPosition", eye.Map(float.CreateTruncating));
-    bodyShader.Set("uSunPosition", system.Sun.Position.Map(float.CreateTruncating));
+    bodyShader.Set("uCameraPosition", cameraPosition.Map(float.CreateTruncating));
+    bodyShader.Set("uSunPosition", (system.Sun.Position - origin).Map(float.CreateTruncating));
     var radiansPerPixel = FieldOfView / size.Y;
     for (var i = 0; i < system.Bodies.Count; i++)
     {
@@ -111,7 +168,7 @@ window.Render += _ =>
         // A body blown up into a marker is lit evenly, so its night side does not hide it;
         // at four times its size and more it is flat, at its own size it gets the faint ambient light only.
         var marker = Math.Clamp(Math.Log2(radius / body.Radius) / 2, 0, 1);
-        var model = Matrix4x4<double>.Compose(body.Position, body.Rotation, Vector3<double>.One * radius);
+        var model = Matrix4x4<double>.Compose(body.Position - origin, body.Rotation, Vector3<double>.One * radius);
         bodyShader.Set("uModel", model.Map(float.CreateTruncating));
         bodyShader.Set("uNormalMatrix", model.NormalMatrix().Map(float.CreateTruncating));
         bodyShader.Set("uPattern", (int)body.Surface.Pattern);
@@ -129,11 +186,13 @@ window.Render += _ =>
     foreach (var (body, line) in orbitLines)
     {
         var model = Matrix4x4<double>.Compose(
-            body.Parent!.Position, body.OrbitOrientation, Vector3<double>.One * body.OrbitElements.SemiMajorAxis);
+            body.Parent!.Position - origin, body.OrbitOrientation, Vector3<double>.One * body.OrbitElements.SemiMajorAxis);
         lineShader.Set("uModel", model.Map(float.CreateTruncating));
         lineShader.Set("uColor", body.Surface.Color * 0.4f);
         line.Draw();
     }
+
+    scene.CopyToWindow();
 };
 
 window.Closing += () =>
@@ -143,11 +202,9 @@ window.Closing += () =>
     sphere.Dispose();
     lineShader.Dispose();
     bodyShader.Dispose();
+    scene.Dispose();
     input.Dispose();
     gl.Dispose();
 };
 
 window.Run();
-
-// The Sun is seen with the inner planets around it, any other body from five of its radii.
-double DefaultDistance(Body body) => body == system.Sun ? 3 * SolarSystem.Au : 5 * body.Radius;
