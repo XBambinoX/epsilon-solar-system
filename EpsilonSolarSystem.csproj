@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <Using Include="EpsilonSolarSystem" />
+    <Using Include="Epsilon.Core" />
     <Using Include="Epsilon.LinearAlgebra" />
     <Using Include="Silk.NET.Input" />
     <Using Include="Silk.NET.OpenGL" />

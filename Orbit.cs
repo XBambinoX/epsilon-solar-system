@@ -41,13 +41,24 @@ sealed class Orbit(OrbitalElements atJ2000, OrbitalElements perCentury)
         return (orientation.Rotate(inPlane), orientation);
     }
 
-    // Kepler's equation M = E - e sin E by Newton's method; a few steps reach full precision for e < 0.3.
+    /// <summary>
+    /// Kepler's equation M = E - e sin E, written to be zero at the answer, as an Epsilon expression: the eccentric
+    /// anomaly E, the eccentricity e and the mean anomaly M are its variables. (Parsed from text, an "e" would be
+    /// Euler's number, so it is built with the C# operators.)
+    /// </summary>
+    public static Expr Kepler { get; } = new Variable("E") - new Variable("e") * new Sin(new Variable("E")) - new Variable("M");
+
+    /// <summary>The derivative of <see cref="Kepler"/> in E, found by Epsilon symbolically: 1 - e cos E.</summary>
+    public static Expr KeplerSlope { get; } = Kepler.Differentiate("E");
+
+    // Solves Kepler's equation by Newton's method with the symbolic derivative; a few steps reach full precision
+    // for e < 0.3.
     static double EccentricAnomaly(double meanAnomaly, double e)
     {
         meanAnomaly = Math.IEEERemainder(meanAnomaly, 2 * Math.PI);
-        var eccentricAnomaly = meanAnomaly + e * Math.Sin(meanAnomaly);
+        var values = new Dictionary<string, double> { ["E"] = meanAnomaly + e * Math.Sin(meanAnomaly), ["e"] = e, ["M"] = meanAnomaly };
         for (var i = 0; i < 6; i++)
-            eccentricAnomaly -= (eccentricAnomaly - e * Math.Sin(eccentricAnomaly) - meanAnomaly) / (1 - e * Math.Cos(eccentricAnomaly));
-        return eccentricAnomaly;
+            values["E"] -= Kepler.Evaluate(values) / KeplerSlope.Evaluate(values);
+        return values["E"];
     }
 }

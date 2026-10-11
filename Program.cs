@@ -84,6 +84,7 @@ window.Load += () =>
     }
 
     Console.WriteLine($"OpenGL {gl.GetStringS(StringName.Version)}, {gl.GetStringS(StringName.Renderer)}");
+    Console.WriteLine($"Kepler's equation {Orbit.Kepler.Print()} = 0, its derivative in E {Orbit.KeplerSlope.Print()}");
     // The sky is painted first: that sets its own framebuffer and viewport.
     sky = new Sky(gl);
     // With display scaling the framebuffer is larger than the window, and no resize event comes at the start.
