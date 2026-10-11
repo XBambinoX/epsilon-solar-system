@@ -144,7 +144,7 @@ sealed class Camera(Body body)
         if (Destination is null)
             return;
         if (turning)
-            (yaw, pitch) = Angles(Forward);
+            (yaw, pitch) = Angles(Orientation);
         turning = false;
         Destination = null;
     }
@@ -154,9 +154,17 @@ sealed class Camera(Body body)
     static Quaternion<double> Rotation(double yaw, double pitch) =>
         Quaternion<double>.FromEulerAngles(new(0, -pitch, yaw), EulerOrder.XYZ);
 
-    // The yaw and the pitch that look along the direction.
+    // The yaw and the pitch of an orientation: its Euler angles in the order XYZ without the roll. The roll comes
+    // first, about the forward axis, so leaving it out keeps the direction the camera looks in.
+    static (double Yaw, double Pitch) Angles(Quaternion<double> orientation)
+    {
+        var angles = orientation.ToEulerAngles(EulerOrder.XYZ);
+        return (angles.Z, -angles.Y);
+    }
+
+    // The yaw and the pitch that look along the direction: those of the shortest turn from +x to it.
     static (double Yaw, double Pitch) Angles(Vector3<double> direction) =>
-        (Math.Atan2(direction.Y, direction.X), Math.Atan2(direction.Z, double.Hypot(direction.X, direction.Y)));
+        Angles(Quaternion<double>.FromToRotation(Vector3<double>.UnitX, direction));
 
     static Quaternion<double> Facing(Vector3<double> direction)
     {

@@ -27,9 +27,9 @@ static class StarField
             if (i % 2 == 0)
             {
                 // Uniform on the sphere: the height is uniform in [-1, 1] (Archimedes), and so is the angle around.
-                var z = 2 * random.NextDouble() - 1;
+                var height = 2 * random.NextDouble() - 1;
                 var angle = 2 * Math.PI * random.NextDouble();
-                direction = new(Math.Sqrt(1 - z * z) * Math.Cos(angle), Math.Sqrt(1 - z * z) * Math.Sin(angle), z);
+                direction = Direction(angle, Math.Asin(height));
                 // Few bright stars, many faint ones.
                 brightness = 0.25 + 0.75 * Math.Pow(random.NextDouble(), 5);
             }
@@ -37,14 +37,17 @@ static class StarField
             {
                 var longitude = 2 * Math.PI * random.NextDouble();
                 var latitude = BandWidth * Gaussian(random);
-                direction = galacticToEcliptic.Rotate(new(
-                    Math.Cos(latitude) * Math.Cos(longitude), Math.Cos(latitude) * Math.Sin(longitude), Math.Sin(latitude)));
+                direction = galacticToEcliptic.Rotate(Direction(longitude, latitude));
                 brightness = 0.12 + 0.55 * Math.Pow(random.NextDouble(), 5);
             }
             stars[i] = new(direction.Map(float.CreateTruncating), (float)brightness);
         }
         return new(gl, PrimitiveType.Points, stars);
     }
+
+    // The direction at a longitude and a latitude: +x turned up by the latitude, then around +z by the longitude.
+    static Vector3<double> Direction(double longitude, double latitude) =>
+        Quaternion<double>.FromEulerAngles(new(0, -latitude, longitude), EulerOrder.XYZ).Rotate(Vector3<double>.UnitX);
 
     // A standard normal number by the Box-Muller transform.
     static double Gaussian(Random random) =>

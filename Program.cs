@@ -42,7 +42,7 @@ system.Update(julianDate);
 // V shows or hides the velocities.
 var camera = new Camera(system.Sun);
 var dragging = false;
-System.Numerics.Vector2? lastMouse = null;
+Vector2<float>? lastMouse = null;
 // F shows what an engine that keeps its world in float would: the GPU gets coordinates around the Sun instead
 // of around the camera, and a float there has steps of 16 km at Earth's distance, 500 km at Neptune's.
 var floatWorld = false;
@@ -84,10 +84,14 @@ window.Load += () =>
             dragging = false;
             m.Cursor.CursorMode = CursorMode.Normal;
         };
-        mouse.MouseMove += (_, position) =>
+        mouse.MouseMove += (_, point) =>
         {
+            var position = Vector2<float>.FromSystemNumerics(point);
             if (dragging && lastMouse is { } last)
-                camera.Turn(position.X - last.X, position.Y - last.Y);
+            {
+                var drag = position - last;
+                camera.Turn(drag.X, drag.Y);
+            }
             lastMouse = position;
         };
     }

@@ -27,15 +27,18 @@ sealed class Orbit(OrbitalElements atJ2000, OrbitalElements perCentury)
     /// <summary>The derivative of <see cref="Kepler"/> in E, found by Epsilon symbolically: 1 - e cos E.</summary>
     public static Expr KeplerSlope { get; } = Kepler.Differentiate("E");
 
+    // Where Newton's method starts: E = M + e sin M, close to the answer for a small eccentricity.
+    static readonly Expr FirstGuess = M + Eccentricity * new Sin(M);
+
     /// <summary>
     /// How fast E grows with M: Kepler's equation holds all along the orbit, so by implicit differentiation
     /// dE/dM = -(dK/dM) / (dK/dE), both derivatives found symbolically.
     /// </summary>
     public static Expr AnomalyRate { get; } = (-Kepler.Differentiate("M") / KeplerSlope).Simplify();
 
-    // The place in the plane of the orbit, the parent at the origin and the perihelion on +x.
-    static readonly Expr PlaneX = A * (new Cos(E) - Eccentricity);
-    static readonly Expr PlaneY = A * new Sqrt(1 - Eccentricity * Eccentricity) * new Sin(E);
+    /// <summary>The place in the plane of the orbit at the eccentric anomaly E, the parent at the origin and the perihelion on +x.</summary>
+    public static Expr PlaneX { get; } = A * (new Cos(E) - Eccentricity);
+    public static Expr PlaneY { get; } = A * new Sqrt(1 - Eccentricity * Eccentricity) * new Sin(E);
 
     /// <summary>The velocity in the plane of the orbit per radian of mean anomaly, by the chain rule: d/dE * dE/dM.</summary>
     public static Expr VelocityX { get; } = (PlaneX.Differentiate("E") * AnomalyRate).Simplify();
@@ -77,8 +80,7 @@ sealed class Orbit(OrbitalElements atJ2000, OrbitalElements perCentury)
     // reach full precision for e < 0.3.
     static double EccentricAnomaly(Dictionary<string, double> values)
     {
-        double meanAnomaly = values["M"], e = values["e"];
-        values["E"] = meanAnomaly + e * Math.Sin(meanAnomaly);
+        values["E"] = FirstGuess.Evaluate(values);
         for (var i = 0; i < 6; i++)
             values["E"] -= Kepler.Evaluate(values) / KeplerSlope.Evaluate(values);
         return values["E"];

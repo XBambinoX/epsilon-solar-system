@@ -59,26 +59,28 @@ sealed class Mesh : IDisposable
                     var polar = Math.PI * stack / stacks;
                     var longitude = (double)slice / slices;
                     var azimuth = 2 * Math.PI * longitude - Math.PI;
-                    data.AddRange([
-                        (float)(Math.Sin(polar) * Math.Cos(azimuth)), (float)(Math.Sin(polar) * Math.Sin(azimuth)), (float)Math.Cos(polar),
-                        (float)longitude, (float)stack / stacks]);
+                    // The north pole turned down by the polar angle, then around z by the azimuth.
+                    var point = Quaternion<double>.FromEulerAngles(new(0, polar, azimuth), EulerOrder.XYZ)
+                        .Rotate(Vector3<double>.UnitZ).Map(float.CreateTruncating);
+                    var mapPlace = new Vector2<double>(longitude, (double)stack / stacks).Map(float.CreateTruncating);
+                    data.AddRange([point.X, point.Y, point.Z, mapPlace.X, mapPlace.Y]);
                 }
         return new(gl, PrimitiveType.Triangles, [.. data], [3, 2]);
     }
 
     /// <summary>
     /// The ellipse of semi-major axis 1 with a focus at the origin and the perihelion on +x, in the xy plane:
-    /// an orbit in its own plane, which <see cref="Orbit.At"/> turns into place.
+    /// an orbit in its own plane, which <see cref="Orbit.At"/> turns into place. Its points come from the same
+    /// expressions as the places of the bodies, <see cref="Orbit.PlaneX"/> and <see cref="Orbit.PlaneY"/>.
     /// </summary>
     public static Mesh Ellipse(GL gl, double eccentricity, int segments = 4096)
     {
         var points = new Vector3<float>[segments];
-        var minorAxis = Math.Sqrt(1 - eccentricity * eccentricity);
+        var values = new Dictionary<string, double> { ["a"] = 1, ["e"] = eccentricity };
         for (var i = 0; i < segments; i++)
         {
-            var eccentricAnomaly = 2 * Math.PI * i / segments;
-            points[i] = new Vector3<double>(Math.Cos(eccentricAnomaly) - eccentricity, minorAxis * Math.Sin(eccentricAnomaly), 0)
-                .Map(float.CreateTruncating);
+            values["E"] = 2 * Math.PI * i / segments;
+            points[i] = new Vector3<double>(Orbit.PlaneX.Evaluate(values), Orbit.PlaneY.Evaluate(values), 0).Map(float.CreateTruncating);
         }
         return new(gl, PrimitiveType.LineLoop, points);
     }
