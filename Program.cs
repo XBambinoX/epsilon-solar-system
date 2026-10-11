@@ -3,6 +3,10 @@ const double DaysPerSecond = 1;
 const double FieldOfView = Math.PI / 4;
 // Far away a planet would be smaller than a pixel, so every body is drawn at least this large.
 const double MinimumRadiusInPixels = 3;
+// A velocity arrow is two pixels long for each km/s, or, for a body that looks larger than 40 pixels across, a radius
+// of the body for each 20 km/s.
+const double ArrowPixelsPerKmPerSecond = 2;
+const double ArrowKmPerSecondPerRadius = 20;
 // With reverse-Z in a float depth buffer the near plane can be a meter away and the far plane at infinity.
 const double NearPlane = 0.001;
 
@@ -28,18 +32,21 @@ Mesh sphere = null!;
 Dictionary<Body, SurfaceMap> maps = null!;
 Mesh stars = null!;
 Dictionary<Body, Mesh> orbitLines = null!;
+Mesh arrow = null!;
 
 var system = new SolarSystem();
 var julianDate = SolarSystem.JulianDate(DateTime.UtcNow);
 system.Update(julianDate);
 
-// 0 goes over to the Sun, 1 to 8 to the planets, 9 to the Moon; W, A, S, D, E, Q fly; a drag with the left button turns.
+// 0 goes over to the Sun, 1 to 8 to the planets, 9 to the Moon; W, A, S, D, E, Q fly; a drag with the left button turns;
+// V shows or hides the velocities.
 var camera = new Camera(system.Sun);
 var dragging = false;
 System.Numerics.Vector2? lastMouse = null;
 // F shows what an engine that keeps its world in float would: the GPU gets coordinates around the Sun instead
 // of around the camera, and a float there has steps of 16 km at Earth's distance, 500 km at Neptune's.
 var floatWorld = false;
+var showVelocities = true;
 
 window.Load += () =>
 {
@@ -54,6 +61,8 @@ window.Load += () =>
             camera.GoTo(system.Bodies[key - Key.Number0]);
         else if (key == Key.F)
             floatWorld = !floatWorld;
+        else if (key == Key.V)
+            showVelocities = !showVelocities;
     };
     foreach (var mouse in input.Mice)
     {
@@ -85,6 +94,7 @@ window.Load += () =>
 
     Console.WriteLine($"OpenGL {gl.GetStringS(StringName.Version)}, {gl.GetStringS(StringName.Renderer)}");
     Console.WriteLine($"Kepler's equation {Orbit.Kepler.Print()} = 0, its derivative in E {Orbit.KeplerSlope.Print()}");
+    Console.WriteLine($"dE/dM = {Orbit.AnomalyRate.Print()}, velocity per radian of M ({Orbit.VelocityX.Print()}, {Orbit.VelocityY.Print()})");
     // The sky is painted first: that sets its own framebuffer and viewport.
     sky = new Sky(gl);
     // With display scaling the framebuffer is larger than the window, and no resize event comes at the start.
@@ -112,6 +122,7 @@ window.Load += () =>
     orbitLines = system.Bodies
         .Where(body => body.Orbit is not null)
         .ToDictionary(body => body, body => Mesh.Ellipse(gl, body.OrbitElements.Eccentricity));
+    arrow = Mesh.Arrow(gl);
 };
 
 window.FramebufferResize += size =>
@@ -187,10 +198,11 @@ window.Render += _ =>
     bodyShader.Set("uCameraPosition", cameraPosition.Map(float.CreateTruncating));
     bodyShader.Set("uSunPosition", (system.Sun.Position - origin).Map(float.CreateTruncating));
     var radiansPerPixel = FieldOfView / size.Y;
+    double DrawnRadius(Body body) => Math.Max(body.Radius, MinimumRadiusInPixels * radiansPerPixel * eye.Distance(body.Position));
     bodyShader.Set("uSurface", 0);
     foreach (var body in system.Bodies)
     {
-        var radius = Math.Max(body.Radius, MinimumRadiusInPixels * radiansPerPixel * eye.Distance(body.Position));
+        var radius = DrawnRadius(body);
         // A body blown up into a marker is lit evenly, so its night side does not hide it;
         // at four times its size and more it is flat, at its own size it gets the dim ambient light only.
         var marker = Math.Clamp(Math.Log2(radius / body.Radius) / 2, 0, 1);
@@ -215,11 +227,29 @@ window.Render += _ =>
         line.Draw();
     }
 
+    // A velocity, relative to the parent, is an arrow from the surface along the motion.
+    if (showVelocities)
+        foreach (var body in orbitLines.Keys)
+        {
+            var speed = body.Velocity.Norm();
+            var direction = body.Velocity.Normalize();
+            var model = Matrix4x4<double>.Compose(
+                body.Position + direction * DrawnRadius(body) - origin,
+                Quaternion<double>.FromToRotation(Vector3<double>.UnitX, direction),
+                Vector3<double>.One * speed * Math.Max(
+                    ArrowPixelsPerKmPerSecond * radiansPerPixel * eye.Distance(body.Position),
+                    DrawnRadius(body) / ArrowKmPerSecondPerRadius));
+            lineShader.Set("uModel", model.Map(float.CreateTruncating));
+            lineShader.Set("uColor", body.Color);
+            arrow.Draw();
+        }
+
     scene.CopyToWindow();
 };
 
 window.Closing += () =>
 {
+    arrow.Dispose();
     foreach (var line in orbitLines.Values)
         line.Dispose();
     stars.Dispose();

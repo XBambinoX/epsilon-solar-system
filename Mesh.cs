@@ -83,6 +83,13 @@ sealed class Mesh : IDisposable
         return new(gl, PrimitiveType.LineLoop, points);
     }
 
+    /// <summary>An arrow of length 1 from the origin along +x, its head in the xy plane: three line segments.</summary>
+    public static Mesh Arrow(GL gl)
+    {
+        Vector3<float>[] points = [new(0, 0, 0), new(1, 0, 0), new(1, 0, 0), new(0.8f, 0.07f, 0), new(1, 0, 0), new(0.8f, -0.07f, 0)];
+        return new(gl, PrimitiveType.Lines, points);
+    }
+
     public void Draw()
     {
         gl.BindVertexArray(vertexArray);

@@ -19,6 +19,9 @@ sealed class Body(string name, double radius, Quaternion<double> frame, double p
     /// <summary>The center in kilometers, the Sun at the origin, z toward the north pole of the ecliptic.</summary>
     public Vector3<double> Position { get; set; }
 
+    /// <summary>The velocity relative to the parent, in km/s; zero for the Sun.</summary>
+    public Vector3<double> Velocity { get; private set; }
+
     /// <summary>The turn from the sphere mesh to the body; the mesh has longitude 0 on +x.</summary>
     public Quaternion<double> Rotation { get; private set; } = Quaternion<double>.Identity;
 
@@ -34,8 +37,9 @@ sealed class Body(string name, double radius, Quaternion<double> frame, double p
         if (orbit is not null && parent is not null)
         {
             var centuries = daysSinceJ2000 / 36525;
-            var (offset, orientation) = orbit.At(centuries);
+            var (offset, velocity, orientation) = orbit.At(centuries);
             Position = parent.Position + offset;
+            Velocity = velocity;
             OrbitElements = orbit.ElementsAt(centuries);
             OrbitOrientation = orientation;
         }
