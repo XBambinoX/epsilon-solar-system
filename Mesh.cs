@@ -1,6 +1,9 @@
 namespace EpsilonSolarSystem;
 
-/// <summary>Vertices on the GPU drawn as triangles, a closed line or points; a vertex is attribute 0 of the shader.</summary>
+/// <summary>
+/// Vertices on the GPU drawn as triangles, a closed line or points. A vertex is one or more attributes of
+/// the shader, at locations 0, 1, and so on.
+/// </summary>
 sealed class Mesh : IDisposable
 {
     readonly GL gl;
@@ -9,14 +12,16 @@ sealed class Mesh : IDisposable
     readonly uint vertexBuffer;
     readonly uint vertexCount;
 
-    public Mesh(GL gl, PrimitiveType primitive, Vector3<float>[] vertices) : this(gl, primitive, AsFloats(vertices), 3) { }
+    public Mesh(GL gl, PrimitiveType primitive, Vector3<float>[] vertices) : this(gl, primitive, AsFloats(vertices), [3]) { }
 
-    public Mesh(GL gl, PrimitiveType primitive, Vector4<float>[] vertices) : this(gl, primitive, AsFloats(vertices), 4) { }
+    public Mesh(GL gl, PrimitiveType primitive, Vector4<float>[] vertices) : this(gl, primitive, AsFloats(vertices), [4]) { }
 
-    Mesh(GL gl, PrimitiveType primitive, ReadOnlySpan<float> data, int floatsPerVertex)
+    // The vertices one after another, each with its attributes in order; attribute i has attributeSizes[i] floats.
+    Mesh(GL gl, PrimitiveType primitive, ReadOnlySpan<float> data, int[] attributeSizes)
     {
         this.gl = gl;
         this.primitive = primitive;
+        var floatsPerVertex = attributeSizes.Sum();
         vertexCount = (uint)(data.Length / floatsPerVertex);
 
         vertexArray = gl.GenVertexArray();
@@ -24,34 +29,41 @@ sealed class Mesh : IDisposable
         vertexBuffer = gl.GenBuffer();
         gl.BindBuffer(BufferTargetARB.ArrayBuffer, vertexBuffer);
         gl.BufferData(BufferTargetARB.ArrayBuffer, data, BufferUsageARB.StaticDraw);
-        gl.EnableVertexAttribArray(0);
-        gl.VertexAttribPointer(0, floatsPerVertex, VertexAttribPointerType.Float, false, (uint)(floatsPerVertex * sizeof(float)), 0);
+        var offset = 0;
+        for (var i = 0; i < attributeSizes.Length; i++)
+        {
+            gl.EnableVertexAttribArray((uint)i);
+            gl.VertexAttribPointer((uint)i, attributeSizes[i], VertexAttribPointerType.Float, false,
+                (uint)(floatsPerVertex * sizeof(float)), offset * sizeof(float));
+            offset += attributeSizes[i];
+        }
         gl.BindVertexArray(0);
     }
 
-    /// <summary>The unit sphere around the origin, poles on the z axis; a point on it is also its normal.</summary>
-    public static Mesh Sphere(GL gl, int stacks = 32, int slices = 64)
+    /// <summary>
+    /// The unit sphere around the origin, poles on the z axis; a point on it is also its normal. A vertex is
+    /// the point and its place on an equirectangular map: the longitude from 0 at -180 degrees (on -x) to 1 at
+    /// +180 degrees, growing eastward (counterclockwise seen from +z), and the latitude from 0 at the north
+    /// pole to 1 at the south pole, which is the first row of the map's image downward.
+    /// </summary>
+    public static Mesh Sphere(GL gl, int stacks = 64, int slices = 128)
     {
-        // Latitude-longitude grid: stacks from the north pole (+z) down, slices around the z axis.
-        // Each cell gives two triangles, counterclockwise seen from outside.
-        var triangles = new List<Vector3<float>>(stacks * slices * 6);
+        // Latitude-longitude grid: stacks from the north pole down, slices around the z axis. Each cell gives
+        // two triangles, counterclockwise seen from outside. The last slice ends where the first begins, with
+        // its own vertices at longitude 1 instead of 0, so the map has no seam there.
+        var data = new List<float>(stacks * slices * 6 * 5);
         for (var i = 0; i < stacks; i++)
             for (var j = 0; j < slices; j++)
-            {
-                var a = Point(i, j);
-                var b = Point(i + 1, j);
-                var c = Point(i + 1, j + 1);
-                var d = Point(i, j + 1);
-                triangles.AddRange([a, b, c, a, c, d]);
-            }
-        return new(gl, PrimitiveType.Triangles, [.. triangles]);
-
-        Vector3<float> Point(int stack, int slice)
-        {
-            var polar = MathF.PI * stack / stacks;
-            var azimuth = 2 * MathF.PI * slice / slices;
-            return new(MathF.Sin(polar) * MathF.Cos(azimuth), MathF.Sin(polar) * MathF.Sin(azimuth), MathF.Cos(polar));
-        }
+                foreach (var (stack, slice) in (ReadOnlySpan<(int, int)>)[(i, j), (i + 1, j), (i + 1, j + 1), (i, j), (i + 1, j + 1), (i, j + 1)])
+                {
+                    var polar = Math.PI * stack / stacks;
+                    var longitude = (double)slice / slices;
+                    var azimuth = 2 * Math.PI * longitude - Math.PI;
+                    data.AddRange([
+                        (float)(Math.Sin(polar) * Math.Cos(azimuth)), (float)(Math.Sin(polar) * Math.Sin(azimuth)), (float)Math.Cos(polar),
+                        (float)longitude, (float)stack / stacks]);
+                }
+        return new(gl, PrimitiveType.Triangles, [.. data], [3, 2]);
     }
 
     /// <summary>

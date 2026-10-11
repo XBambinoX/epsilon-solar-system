@@ -4,7 +4,7 @@ namespace EpsilonSolarSystem;
 static class Shaders
 {
     /// <summary>
-    /// Value noise for the surfaces and the sky, put into the shaders that use it: hash, noise and fractalNoise.
+    /// Value noise for the painting of the sky: hash, noise and fractalNoise.
     /// </summary>
     const string Noise = """
         float hash(vec3 p)
@@ -43,80 +43,62 @@ static class Shaders
         }
         """;
 
-    /// <summary>A unit sphere placed by uModel; its vertex is also its normal and the point of the surface pattern.</summary>
+    /// <summary>A unit sphere placed by uModel; its point is also its normal, and it brings its place on the map.</summary>
     public const string BodyVertex = """
         #version 330 core
 
         layout(location = 0) in vec3 aPosition;
+        layout(location = 1) in vec2 aMap;
 
         uniform mat4 uModel;
         uniform mat3 uNormalMatrix;
         uniform mat4 uViewProjection;
 
-        out vec3 vObjectPosition;
         out vec3 vWorldPosition;
         out vec3 vNormal;
+        out vec2 vMap;
 
         void main()
         {
-            vObjectPosition = aPosition;
             vec4 world = uModel * vec4(aPosition, 1.0);
             vWorldPosition = world.xyz;
             vNormal = uNormalMatrix * aPosition;
+            vMap = aMap;
             gl_Position = uViewProjection * world;
         }
         """;
 
     /// <summary>
-    /// The Sun glows with limb darkening (the edge of its disk is dimmer than the center). A planet gets a
-    /// pattern fixed to its surface, so the spin and the tilt of its axis show, and is lit by the Sun plus an
-    /// ambient light: dim, so the night side is not black, or full for a far body drawn as a marker.
+    /// A body with its map. The Sun glows, with limb darkening (the edge of its disk is dimmer than the
+    /// center). A planet is lit by the Sun plus an ambient light: dim, so the night side is not black, or
+    /// full for a far body drawn as a marker.
     /// </summary>
-    public const string BodyFragment = $$"""
+    public const string BodyFragment = """
         #version 330 core
 
-        in vec3 vObjectPosition;
         in vec3 vWorldPosition;
         in vec3 vNormal;
+        in vec2 vMap;
 
-        uniform int uPattern; // 0 glow, 1 rocky, 2 continents, 3 bands, as SurfacePattern
-        uniform vec3 uColor;
-        uniform vec3 uSecondColor;
-        uniform float uPolarCaps;
-        uniform float uSeed;
+        uniform sampler2D uSurface;
+        uniform bool uGlow;
         uniform float uAmbient;
         uniform vec3 uCameraPosition;
         uniform vec3 uSunPosition;
 
         out vec4 fragColor;
 
-        {{Noise}}
-
-        vec3 surface(vec3 p)
-        {
-            vec3 q = 2.5 * p + uSeed;
-            if (uPattern == 1)
-                return mix(uColor, uSecondColor, smoothstep(0.35, 0.65, fractalNoise(q)));
-            if (uPattern == 2)
-                return fractalNoise(q) > 0.47 ? uSecondColor : uColor;
-            // Bands along the latitudes, made wavy by the noise.
-            return mix(uColor, uSecondColor, 0.5 + 0.5 * sin(14.0 * p.z + 3.0 * fractalNoise(1.5 * q)));
-        }
-
         void main()
         {
+            vec3 color = texture(uSurface, vMap).rgb;
             vec3 normal = normalize(vNormal);
-            if (uPattern == 0)
+            float facing = max(dot(normal, normalize(uCameraPosition - vWorldPosition)), 0.0);
+            if (uGlow)
             {
-                float facing = max(dot(normal, normalize(uCameraPosition - vWorldPosition)), 0.0);
-                fragColor = vec4(uColor * (0.4 + 0.6 * sqrt(facing)), 1.0);
+                fragColor = vec4(color * (0.4 + 0.6 * sqrt(facing)), 1.0);
                 return;
             }
 
-            vec3 color = surface(vObjectPosition);
-            if (uPolarCaps > 0.0 && abs(vObjectPosition.z) > uPolarCaps + 0.06 * (fractalNoise(8.0 * vObjectPosition) - 0.5))
-                color = vec3(0.92, 0.94, 0.96);
-            float facing = max(dot(normal, normalize(uCameraPosition - vWorldPosition)), 0.0);
             float diffuse = max(dot(normal, normalize(uSunPosition - vWorldPosition)), 0.0);
             // Light adds up in linear units, and the power 1/2.2 turns it into the brightness of the screen,
             // which keeps the half-lit part bright. The ambient light comes a little more from the camera,

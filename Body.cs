@@ -1,34 +1,25 @@
 namespace EpsilonSolarSystem;
 
-/// <summary>What the shader draws on a body; the numbers match uPattern in <see cref="Shaders.BodyFragment"/>.</summary>
-enum SurfacePattern { Glow, Rocky, Continents, Bands }
-
 /// <summary>
-/// The look of a body: a pattern in two colors, and white polar caps from the given height above
-/// the equator of the unit sphere (0 for none).
+/// A body at its real size, the radius in kilometers, turned as the IAU defines it: the frame of its
+/// equator (z on the north pole, x where the prime meridian is at W = 0), then the prime meridian at the
+/// angle W, in degrees, which grows by a constant number of degrees a day (less than zero for a retrograde
+/// spin). It wears the map in <see cref="Texture"/>; its orbit line has the color <see cref="Color"/>.
 /// </summary>
-sealed record Surface(SurfacePattern Pattern, Vector3<float> Color, Vector3<float> SecondColor, float PolarCaps = 0);
-
-/// <summary>
-/// A body at its real size: the radius in kilometers, the sidereal rotation period in hours (negative
-/// for a retrograde spin about the north pole), the north pole as a unit vector of the ecliptic frame.
-/// </summary>
-sealed class Body(string name, double radius, double rotationHours, Vector3<double> pole, Surface surface,
-    Body? parent = null, Orbit? orbit = null)
+sealed class Body(string name, double radius, Quaternion<double> frame, double primeMeridian, double degreesPerDay,
+    string texture, Vector3<float> color, Body? parent = null, Orbit? orbit = null)
 {
-    // Turns the pole of the sphere mesh (+z) to the body's north pole; the spin then happens about the mesh's z.
-    readonly Quaternion<double> tilt = Quaternion<double>.FromToRotation(Vector3<double>.UnitZ, pole);
-
     public string Name => name;
     public double Radius => radius;
-    public Surface Surface => surface;
+    public string Texture => texture;
+    public Vector3<float> Color => color;
     public Body? Parent => parent;
     public Orbit? Orbit => orbit;
 
     /// <summary>The center in kilometers, the Sun at the origin, z toward the north pole of the ecliptic.</summary>
     public Vector3<double> Position { get; set; }
 
-    /// <summary>The turn from the mesh to the body: the tilt of the axis after the spin of the day.</summary>
+    /// <summary>The turn from the sphere mesh to the body; the mesh has longitude 0 on +x.</summary>
     public Quaternion<double> Rotation { get; private set; } = Quaternion<double>.Identity;
 
     /// <summary>The elements of the orbit now; their size and shape draw the orbit line.</summary>
@@ -48,7 +39,7 @@ sealed class Body(string name, double radius, double rotationHours, Vector3<doub
             OrbitElements = orbit.ElementsAt(centuries);
             OrbitOrientation = orientation;
         }
-        var spin = 2 * Math.PI * Math.IEEERemainder(24 * daysSinceJ2000 / rotationHours, 1);
-        Rotation = tilt * Quaternion<double>.RotationZ(spin);
+        var meridian = Math.IEEERemainder(primeMeridian + degreesPerDay * daysSinceJ2000, 360);
+        Rotation = frame * Quaternion<double>.RotationZ(double.DegreesToRadians(meridian));
     }
 }

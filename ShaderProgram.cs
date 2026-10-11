@@ -38,6 +38,8 @@ sealed class ShaderProgram : IDisposable
 
     public void Set(string name, int value) => gl.Uniform1(Location(name), value);
 
+    public void Set(string name, bool value) => gl.Uniform1(Location(name), value ? 1 : 0);
+
     public void Dispose() => gl.DeleteProgram(handle);
 
     uint Compile(ShaderType type, string source)

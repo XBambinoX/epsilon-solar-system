@@ -25,6 +25,7 @@ ShaderProgram bodyShader = null!;
 ShaderProgram lineShader = null!;
 ShaderProgram starShader = null!;
 Mesh sphere = null!;
+Dictionary<Body, SurfaceMap> maps = null!;
 Mesh stars = null!;
 Dictionary<Body, Mesh> orbitLines = null!;
 
@@ -104,6 +105,7 @@ window.Load += () =>
     lineShader = new ShaderProgram(gl, Shaders.LineVertex, Shaders.LineFragment);
     starShader = new ShaderProgram(gl, Shaders.StarVertex, Shaders.StarFragment);
     sphere = Mesh.Sphere(gl);
+    maps = system.Bodies.ToDictionary(body => body, body => new SurfaceMap(gl, body.Texture));
     stars = StarField.Create(gl);
     // The eccentricities change too slowly to matter, so the shapes of the orbits are made once.
     orbitLines = system.Bodies
@@ -183,9 +185,9 @@ window.Render += _ =>
     bodyShader.Set("uCameraPosition", cameraPosition.Map(float.CreateTruncating));
     bodyShader.Set("uSunPosition", (system.Sun.Position - origin).Map(float.CreateTruncating));
     var radiansPerPixel = FieldOfView / size.Y;
-    for (var i = 0; i < system.Bodies.Count; i++)
+    bodyShader.Set("uSurface", 0);
+    foreach (var body in system.Bodies)
     {
-        var body = system.Bodies[i];
         var radius = Math.Max(body.Radius, MinimumRadiusInPixels * radiansPerPixel * eye.Distance(body.Position));
         // A body blown up into a marker is lit evenly, so its night side does not hide it;
         // at four times its size and more it is flat, at its own size it gets the dim ambient light only.
@@ -193,12 +195,9 @@ window.Render += _ =>
         var model = Matrix4x4<double>.Compose(body.Position - origin, body.Rotation, Vector3<double>.One * radius);
         bodyShader.Set("uModel", model.Map(float.CreateTruncating));
         bodyShader.Set("uNormalMatrix", model.NormalMatrix().Map(float.CreateTruncating));
-        bodyShader.Set("uPattern", (int)body.Surface.Pattern);
-        bodyShader.Set("uColor", body.Surface.Color);
-        bodyShader.Set("uSecondColor", body.Surface.SecondColor);
-        bodyShader.Set("uPolarCaps", body.Surface.PolarCaps);
-        bodyShader.Set("uSeed", 17f * i);
+        bodyShader.Set("uGlow", body == system.Sun);
         bodyShader.Set("uAmbient", (float)double.Lerp(0.02, 1, marker));
+        maps[body].Bind(TextureUnit.Texture0);
         sphere.Draw();
     }
 
@@ -210,7 +209,7 @@ window.Render += _ =>
         var model = Matrix4x4<double>.Compose(
             body.Parent!.Position - origin, body.OrbitOrientation, Vector3<double>.One * body.OrbitElements.SemiMajorAxis);
         lineShader.Set("uModel", model.Map(float.CreateTruncating));
-        lineShader.Set("uColor", body.Surface.Color * 0.4f);
+        lineShader.Set("uColor", body.Color * 0.4f);
         line.Draw();
     }
 
@@ -223,6 +222,8 @@ window.Closing += () =>
         line.Dispose();
     stars.Dispose();
     sky.Dispose();
+    foreach (var map in maps.Values)
+        map.Dispose();
     sphere.Dispose();
     starShader.Dispose();
     lineShader.Dispose();
