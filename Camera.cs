@@ -10,9 +10,9 @@ sealed class Camera(Body body)
 {
     const double OrbitSeconds = 120;
     const double RadiansPerPixel = 0.003;
-    // Going over to another body: first a turn toward it, half a second for each radian, then the way there.
-    const double TurnSecondsPerRadian = 0.5;
-    const double TravelSeconds = 3;
+    // Going over to another body: first a turn toward it, a third of a second for each radian, then the way there.
+    const double TurnSecondsPerRadian = 1.0 / 3;
+    const double TravelSeconds = 1.5;
     // Short of straight up or down, where the yaw is lost.
     static readonly double MaxPitch = double.DegreesToRadians(89);
     // An orbiting camera starts, and ends a trip, looking down on its body from 20 degrees above it.
