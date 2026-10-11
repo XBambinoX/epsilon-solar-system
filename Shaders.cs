@@ -197,8 +197,8 @@ static class Shaders
         """;
 
     /// <summary>
-    /// Paints one face of the sky's cube map: a red-brown haze everywhere, the Milky Way as a dim band broken
-    /// up by dust, and patches of glowing gas, red at the thin edges, orange and then yellow-green in the
+    /// Paints one face of the sky's cube map: a dark violet haze everywhere, the Milky Way as a dim band broken
+    /// up by dust, and patches of glowing gas, violet at the thin edges, pink and then pale pink in the
     /// densest knots. All of it is noise of the direction, so the faces meet without seams.
     /// </summary>
     public const string SkyPaintFragment = $$"""
@@ -228,20 +228,20 @@ static class Shaders
         {
             vec3 d = normalize(direction(uFace, vScreen));
 
-            vec3 color = vec3(0.04, 0.014, 0.02) * (0.3 + 1.4 * fractalNoise(2.0 * d));
+            vec3 color = vec3(0.03, 0.012, 0.035) * (0.3 + 1.4 * fractalNoise(2.0 * d));
 
             float latitude = dot(d, uGalacticPole);
             float band = exp(-latitude * latitude / 0.02) * smoothstep(0.3, 0.7, fractalNoise(6.0 * d + 5.0));
-            color += band * vec3(0.10, 0.07, 0.06);
+            color += band * vec3(0.09, 0.07, 0.1);
 
             // Wisps: noise whose point is pushed around by more noise.
             float patches = smoothstep(0.42, 0.7, fractalNoise(1.3 * d + vec3(3.1, 7.7, 1.3)));
             vec3 q = 3.0 * d;
             vec3 warp = vec3(fractalNoise(q + 11.0), fractalNoise(q + 23.0), fractalNoise(q + 37.0));
             float density = patches * smoothstep(0.35, 0.85, fractalNoise(5.0 * d + 3.0 * warp));
-            vec3 gas = mix(vec3(0.5, 0.05, 0.1), vec3(1.0, 0.5, 0.15), smoothstep(0.1, 0.5, density));
-            gas = mix(gas, vec3(0.6, 0.9, 0.35), 0.7 * smoothstep(0.55, 0.9, density));
-            color += 0.5 * density * gas;
+            vec3 gas = mix(vec3(0.4, 0.08, 0.55), vec3(0.95, 0.3, 0.7), smoothstep(0.1, 0.5, density));
+            gas = mix(gas, vec3(1.0, 0.75, 0.95), 0.6 * smoothstep(0.55, 0.9, density));
+            color += 0.42 * density * gas;
 
             fragColor = vec4(color, 1.0);
         }
