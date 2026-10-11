@@ -33,7 +33,7 @@ var system = new SolarSystem();
 var julianDate = SolarSystem.JulianDate(DateTime.UtcNow);
 system.Update(julianDate);
 
-// 0 circles the Sun, 1 to 8 the planets, 9 the Moon; W, A, S, D, E, Q fly; a drag with the left button turns.
+// 0 goes over to the Sun, 1 to 8 to the planets, 9 to the Moon; W, A, S, D, E, Q fly; a drag with the left button turns.
 var camera = new Camera(system.Sun);
 var dragging = false;
 System.Numerics.Vector2? lastMouse = null;
@@ -51,7 +51,7 @@ window.Load += () =>
         if (key == Key.Escape)
             window.Close();
         else if (key is >= Key.Number0 and <= Key.Number9)
-            camera.Orbit(system.Bodies[key - Key.Number0]);
+            camera.GoTo(system.Bodies[key - Key.Number0]);
         else if (key == Key.F)
             floatWorld = !floatWorld;
     };
@@ -144,7 +144,8 @@ window.Update += deltaTime =>
     camera.Update(deltaTime);
 
     var title = $"Epsilon Solar System - {SolarSystem.ToDateTime(julianDate):yyyy-MM-dd} - " +
-        $"{(camera.IsFree ? "flying with" : "orbiting")} {camera.Focus.Name} - " +
+        (camera.Destination is { } destination ? $"going to {destination.Name}" :
+            $"{(camera.IsFree ? "flying with" : "orbiting")} {camera.Focus.Name}") + " - " +
         (floatWorld ? "float world coordinates (F)" : "camera-relative, double (F)");
     if (window.Title != title)
         window.Title = title;
