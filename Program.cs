@@ -20,9 +20,12 @@ GL gl = null!;
 IInputContext input = null!;
 IKeyboard keyboard = null!;
 SceneFramebuffer scene = null!;
+Sky sky = null!;
 ShaderProgram bodyShader = null!;
 ShaderProgram lineShader = null!;
+ShaderProgram starShader = null!;
 Mesh sphere = null!;
+Mesh stars = null!;
 Dictionary<Body, Mesh> orbitLines = null!;
 
 var system = new SolarSystem();
@@ -80,6 +83,8 @@ window.Load += () =>
     }
 
     Console.WriteLine($"OpenGL {gl.GetStringS(StringName.Version)}, {gl.GetStringS(StringName.Renderer)}");
+    // The sky is painted first: that sets its own framebuffer and viewport.
+    sky = new Sky(gl);
     // With display scaling the framebuffer is larger than the window, and no resize event comes at the start.
     var size = window.FramebufferSize;
     gl.Viewport(size);
@@ -91,10 +96,15 @@ window.Load += () =>
     gl.ClipControl(ClipControlOrigin.LowerLeft, ClipControlDepth.ZeroToOne);
     gl.ClearDepth(0);
     gl.DepthFunc(DepthFunction.Greater);
+    // The stars set their own size, and add their light to the background.
+    gl.Enable(EnableCap.ProgramPointSize);
+    gl.BlendFunc(BlendingFactor.One, BlendingFactor.One);
 
     bodyShader = new ShaderProgram(gl, Shaders.BodyVertex, Shaders.BodyFragment);
     lineShader = new ShaderProgram(gl, Shaders.LineVertex, Shaders.LineFragment);
+    starShader = new ShaderProgram(gl, Shaders.StarVertex, Shaders.StarFragment);
     sphere = Mesh.Sphere(gl);
+    stars = StarField.Create(gl);
     // The eccentricities change too slowly to matter, so the shapes of the orbits are made once.
     orbitLines = system.Bodies
         .Where(body => body.Orbit is not null)
@@ -156,6 +166,18 @@ window.Render += _ =>
         FieldOfView, (double)size.X / size.Y, NearPlane, double.PositiveInfinity, DepthRange.OneToZero);
     var viewProjection = (projection * view).Map(float.CreateTruncating);
 
+    // The sky and the stars first: they are at infinity, behind everything, where the depth test would drop them.
+    // The sky is looked up through the inverse of the projection and a view that only turns.
+    gl.Disable(EnableCap.DepthTest);
+    var turn = Matrix4x4<double>.LookAt(Vector3<double>.Zero, camera.Forward, camera.Up);
+    sky.Draw((projection * turn).Inverse().Map(float.CreateTruncating));
+    gl.Enable(EnableCap.Blend);
+    starShader.Use();
+    starShader.Set("uViewProjection", viewProjection);
+    stars.Draw();
+    gl.Disable(EnableCap.Blend);
+    gl.Enable(EnableCap.DepthTest);
+
     bodyShader.Use();
     bodyShader.Set("uViewProjection", viewProjection);
     bodyShader.Set("uCameraPosition", cameraPosition.Map(float.CreateTruncating));
@@ -166,7 +188,7 @@ window.Render += _ =>
         var body = system.Bodies[i];
         var radius = Math.Max(body.Radius, MinimumRadiusInPixels * radiansPerPixel * eye.Distance(body.Position));
         // A body blown up into a marker is lit evenly, so its night side does not hide it;
-        // at four times its size and more it is flat, at its own size it gets the faint ambient light only.
+        // at four times its size and more it is flat, at its own size it gets the dim ambient light only.
         var marker = Math.Clamp(Math.Log2(radius / body.Radius) / 2, 0, 1);
         var model = Matrix4x4<double>.Compose(body.Position - origin, body.Rotation, Vector3<double>.One * radius);
         bodyShader.Set("uModel", model.Map(float.CreateTruncating));
@@ -176,7 +198,7 @@ window.Render += _ =>
         bodyShader.Set("uSecondColor", body.Surface.SecondColor);
         bodyShader.Set("uPolarCaps", body.Surface.PolarCaps);
         bodyShader.Set("uSeed", 17f * i);
-        bodyShader.Set("uAmbient", (float)double.Lerp(0.03, 1, marker));
+        bodyShader.Set("uAmbient", (float)double.Lerp(0.02, 1, marker));
         sphere.Draw();
     }
 
@@ -199,7 +221,10 @@ window.Closing += () =>
 {
     foreach (var line in orbitLines.Values)
         line.Dispose();
+    stars.Dispose();
+    sky.Dispose();
     sphere.Dispose();
+    starShader.Dispose();
     lineShader.Dispose();
     bodyShader.Dispose();
     scene.Dispose();

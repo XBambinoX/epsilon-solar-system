@@ -85,8 +85,11 @@ sealed class SolarSystem
             new(atJ2000 with { SemiMajorAxis = atJ2000.SemiMajorAxis * Au },
                 perCentury with { SemiMajorAxis = perCentury.SemiMajorAxis * Au }));
 
-    // A north pole given by right ascension and declination in degrees, turned from the equator to the ecliptic.
-    static Vector3<double> Pole(double rightAscension, double declination)
+    /// <summary>
+    /// A north pole (of a body, or of the Milky Way) given by right ascension and declination in degrees,
+    /// turned from the equator to the ecliptic.
+    /// </summary>
+    public static Vector3<double> Pole(double rightAscension, double declination)
     {
         var alpha = double.DegreesToRadians(rightAscension);
         var delta = double.DegreesToRadians(declination);

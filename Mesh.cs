@@ -1,6 +1,6 @@
 namespace EpsilonSolarSystem;
 
-/// <summary>Points on the GPU drawn as triangles or as a closed line.</summary>
+/// <summary>Vertices on the GPU drawn as triangles, a closed line or points; a vertex is attribute 0 of the shader.</summary>
 sealed class Mesh : IDisposable
 {
     readonly GL gl;
@@ -9,19 +9,23 @@ sealed class Mesh : IDisposable
     readonly uint vertexBuffer;
     readonly uint vertexCount;
 
-    public Mesh(GL gl, PrimitiveType primitive, Vector3<float>[] vertices)
+    public Mesh(GL gl, PrimitiveType primitive, Vector3<float>[] vertices) : this(gl, primitive, AsFloats(vertices), 3) { }
+
+    public Mesh(GL gl, PrimitiveType primitive, Vector4<float>[] vertices) : this(gl, primitive, AsFloats(vertices), 4) { }
+
+    Mesh(GL gl, PrimitiveType primitive, ReadOnlySpan<float> data, int floatsPerVertex)
     {
         this.gl = gl;
         this.primitive = primitive;
-        vertexCount = (uint)vertices.Length;
+        vertexCount = (uint)(data.Length / floatsPerVertex);
 
         vertexArray = gl.GenVertexArray();
         gl.BindVertexArray(vertexArray);
         vertexBuffer = gl.GenBuffer();
         gl.BindBuffer(BufferTargetARB.ArrayBuffer, vertexBuffer);
-        gl.BufferData(BufferTargetARB.ArrayBuffer, vertices, BufferUsageARB.StaticDraw);
+        gl.BufferData(BufferTargetARB.ArrayBuffer, data, BufferUsageARB.StaticDraw);
         gl.EnableVertexAttribArray(0);
-        gl.VertexAttribPointer(0, 3, VertexAttribPointerType.Float, false, 3 * sizeof(float), 0);
+        gl.VertexAttribPointer(0, floatsPerVertex, VertexAttribPointerType.Float, false, (uint)(floatsPerVertex * sizeof(float)), 0);
         gl.BindVertexArray(0);
     }
 
@@ -78,4 +82,8 @@ sealed class Mesh : IDisposable
         gl.DeleteBuffer(vertexBuffer);
         gl.DeleteVertexArray(vertexArray);
     }
+
+    // The fixed-size vectors store their entries in order without padding, so they go to the GPU as they are.
+    static ReadOnlySpan<float> AsFloats<T>(T[] vertices) where T : struct =>
+        System.Runtime.InteropServices.MemoryMarshal.Cast<T, float>(vertices);
 }
